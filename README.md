@@ -19,7 +19,17 @@ Then `cargo run`.
 
 ### Or with Docker
 
-`docker compose up -d` uses the prebuilt image from `ghcr.io/fthomys/emojistealer-bot`.
+``` docker-compose.yml
+services:
+  bot:
+    image: ghcr.io/fthomys/emojistealer-bot:latest
+    env_file:
+      - .env
+    restart: unless-stopped
+
+```
+
+`docker compose up -d` uses the prebuilt image from `ghcr.io/fthomys/emojistealer-bot`. In the same folder where the docker compose file is, put the `.env` with the token.
 
 For a local build instead, use `docker compose -f docker-compose.dev.yml up -d --build`.
 
