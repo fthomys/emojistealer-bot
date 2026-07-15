@@ -1,0 +1,6 @@
+services:
+  bot:
+    image: ghcr.io/fthomys/emojistealer-bot:latest
+    env_file:
+      - .env
+    restart: unless-stopped
