@@ -11,6 +11,7 @@ use serenity::all::{
     CreateAttachment, CreateSticker, Emoji, GuildId, Http, Message, MessageReaction,
     ReactionType, Sticker, StickerFormatType,
 };
+use serenity::json::json;
 
 static EMOJI_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<(a?):(\w{2,32}):(\d+)>").unwrap());
@@ -99,13 +100,15 @@ pub async fn steal(
     guild_id: GuildId,
     emoji: &ParsedEmoji,
     name: &str,
+    reason: &str,
 ) -> Result<Emoji> {
     let mut attachment = CreateAttachment::url(http, &emoji.cdn_url()).await?;
     if attachment.data.len() > EMOJI_LIMIT {
         attachment.data = shrink_to_limit(&attachment.data, emoji.animated, EMOJI_LIMIT)?;
     }
     let image = attachment.to_base64();
-    let created = guild_id.create_emoji(http, name, &image).await?;
+    let map = json!({ "name": name, "image": image });
+    let created = http.create_emoji(guild_id, &map, Some(reason)).await?;
     Ok(created)
 }
 
@@ -114,6 +117,7 @@ pub async fn steal_sticker(
     guild_id: GuildId,
     sticker: &ParsedSticker,
     name: &str,
+    reason: &str,
 ) -> Result<Sticker> {
     if sticker.format == StickerFormatType::Gif {
         bail!("GIF-format stickers can't be re-uploaded as guild stickers");
@@ -125,7 +129,12 @@ pub async fn steal_sticker(
     }
 
     let created = guild_id
-        .create_sticker(http, CreateSticker::new(name, attachment).tags("🙂"))
+        .create_sticker(
+            http,
+            CreateSticker::new(name, attachment)
+                .tags("🙂")
+                .audit_log_reason(reason),
+        )
         .await?;
     Ok(created)
 }

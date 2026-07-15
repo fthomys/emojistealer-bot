@@ -37,6 +37,20 @@ impl StealItem {
     }
 }
 
+enum StealSource {
+    Message(String),
+    Pasted,
+}
+
+impl StealSource {
+    fn describe(&self) -> String {
+        match self {
+            StealSource::Message(link) => link.clone(),
+            StealSource::Pasted => "Pasted via `/steal`".to_string(),
+        }
+    }
+}
+
 fn build_modal(picked: &[StealItem]) -> CreateModal {
     let rows: Vec<CreateActionRow> = picked
         .iter()
@@ -62,6 +76,7 @@ async fn run_steal_flow(
     ctx: Context<'_>,
     guild_id: GuildId,
     items: Vec<StealItem>,
+    source: StealSource,
 ) -> Result<(), Error> {
     if items.is_empty() {
         ctx.send(
@@ -172,6 +187,12 @@ async fn run_steal_flow(
         }
     }
 
+    let reason = format!(
+        "Stolen by {} via {}",
+        ctx.author().name,
+        source.describe()
+    );
+
     let mut results = Vec::new();
     for (i, item) in picked.iter().enumerate() {
         let name = names
@@ -182,12 +203,14 @@ async fn run_steal_flow(
         let name = name.trim().to_string();
 
         let outcome = match item {
-            StealItem::Emoji(e) => emoji::steal(&serenity_ctx.http, guild_id, e, &name)
+            StealItem::Emoji(e) => emoji::steal(&serenity_ctx.http, guild_id, e, &name, &reason)
                 .await
                 .map(|created| format!("Stole {}", created)),
-            StealItem::Sticker(s) => emoji::steal_sticker(&serenity_ctx.http, guild_id, s, &name)
-                .await
-                .map(|created| format!("Stole sticker `{}`", created.name)),
+            StealItem::Sticker(s) => {
+                emoji::steal_sticker(&serenity_ctx.http, guild_id, s, &name, &reason)
+                    .await
+                    .map(|created| format!("Stole sticker `{}`", created.name))
+            }
         };
 
         match outcome {
@@ -241,7 +264,7 @@ pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error
             .map(StealItem::Sticker),
     );
 
-    run_steal_flow(ctx, guild_id, items).await
+    run_steal_flow(ctx, guild_id, items, StealSource::Message(message.link())).await
 }
 
 #[poise::command(
@@ -268,5 +291,5 @@ pub async fn steal(
         .map(StealItem::Emoji)
         .collect();
 
-    run_steal_flow(ctx, guild_id, items).await
+    run_steal_flow(ctx, guild_id, items, StealSource::Pasted).await
 }
