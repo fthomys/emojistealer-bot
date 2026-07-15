@@ -5,99 +5,108 @@ use anyhow::Result;
 use serenity::all::{
     ActionRowComponent, ComponentInteractionCollector, ComponentInteractionDataKind,
     CreateActionRow, CreateInputText, CreateInteractionResponse, CreateInteractionResponseMessage,
-    CreateModal, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, EmojiId,
+    CreateModal, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, EmojiId, GuildId,
     InputTextStyle, Message, ModalInteractionCollector, ReactionType,
 };
 
-use crate::emoji::{self, ParsedEmoji};
+use crate::emoji::{self, ParsedEmoji, ParsedSticker};
 
 pub struct Data {}
 pub type Error = anyhow::Error;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
-fn build_modal(picked: &[ParsedEmoji]) -> CreateModal {
+#[derive(Clone)]
+enum StealItem {
+    Emoji(ParsedEmoji),
+    Sticker(ParsedSticker),
+}
+
+impl StealItem {
+    fn display_name(&self) -> &str {
+        match self {
+            StealItem::Emoji(e) => &e.name,
+            StealItem::Sticker(s) => &s.name,
+        }
+    }
+
+    fn kind_label(&self) -> &'static str {
+        match self {
+            StealItem::Emoji(_) => "emoji",
+            StealItem::Sticker(_) => "sticker",
+        }
+    }
+}
+
+fn build_modal(picked: &[StealItem]) -> CreateModal {
     let rows: Vec<CreateActionRow> = picked
         .iter()
         .enumerate()
-        .map(|(i, e)| {
+        .map(|(i, item)| {
             CreateActionRow::InputText(
                 CreateInputText::new(
                     InputTextStyle::Short,
-                    format!("Name for :{}:", e.name),
+                    format!("Name for {} :{}:", item.kind_label(), item.display_name()),
                     i.to_string(),
                 )
-                .value(&e.name)
+                .value(item.display_name())
                 .required(true)
                 .min_length(2)
                 .max_length(32),
             )
         })
         .collect();
-    CreateModal::new("steal_modal", "Name the emoji(s)").components(rows)
+    CreateModal::new("steal_modal", "Name the item(s)").components(rows)
 }
 
-#[poise::command(
-    context_menu_command = "Steal Emoji",
-    guild_only,
-    default_member_permissions = "ADMINISTRATOR"
-)]
-pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error> {
+async fn run_steal_flow(
+    ctx: Context<'_>,
+    guild_id: GuildId,
+    items: Vec<StealItem>,
+) -> Result<(), Error> {
+    if items.is_empty() {
+        ctx.send(
+            poise::CreateReply::default()
+                .ephemeral(true)
+                .content("No custom emojis or stickers found."),
+        )
+        .await?;
+        return Ok(());
+    }
+
     let serenity_ctx = ctx.serenity_context();
-
-    let Some(guild_id) = ctx.guild_id() else {
-        ctx.send(
-            poise::CreateReply::default()
-                .ephemeral(true)
-                .content("This command only works inside a server."),
-        )
-        .await?;
-        return Ok(());
-    };
-
-    let mut emojis = emoji::parse(&message.content);
-    let mut seen: HashSet<u64> = emojis.iter().map(|e| e.id).collect();
-    for e in emoji::parse_reactions(&message.reactions) {
-        if seen.insert(e.id) {
-            emojis.push(e);
-        }
-    }
-    if emojis.is_empty() {
-        ctx.send(
-            poise::CreateReply::default()
-                .ephemeral(true)
-                .content("No custom emojis found in that message."),
-        )
-        .await?;
-        return Ok(());
-    }
 
     let Context::Application(app_ctx) = ctx else {
         return Ok(());
     };
 
-    let picked: Vec<ParsedEmoji> = if emojis.len() == 1 {
+    let picked: Vec<StealItem> = if items.len() == 1 {
         app_ctx
             .interaction
             .create_response(
                 serenity_ctx,
-                CreateInteractionResponse::Modal(build_modal(&emojis)),
+                CreateInteractionResponse::Modal(build_modal(&items)),
             )
             .await?;
-        emojis
+        items
     } else {
-        let options: Vec<CreateSelectMenuOption> = emojis
+        let options: Vec<CreateSelectMenuOption> = items
             .iter()
             .enumerate()
-            .map(|(i, e)| {
-                CreateSelectMenuOption::new(&e.name, i.to_string()).emoji(ReactionType::Custom {
-                    animated: e.animated,
-                    id: EmojiId::new(e.id),
-                    name: Some(e.name.clone()),
-                })
+            .map(|(i, item)| {
+                let label = format!("{} ({})", item.display_name(), item.kind_label());
+                let mut option = CreateSelectMenuOption::new(label, i.to_string());
+                if let StealItem::Emoji(e) = item {
+                    option = option.emoji(ReactionType::Custom {
+                        animated: e.animated,
+                        id: EmojiId::new(e.id),
+                        name: Some(e.name.clone()),
+                    });
+                }
+                option
             })
             .collect();
 
-        let max = emojis.len().min(5) as u8;
+        let max = items.len().min(5) as u8;
         let menu = CreateSelectMenu::new("steal_select", CreateSelectMenuKind::String { options })
             .min_values(1)
             .max_values(max);
@@ -105,7 +114,7 @@ pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error
         ctx.send(
             poise::CreateReply::default()
                 .ephemeral(true)
-                .content("Select up to 5 emojis to steal:")
+                .content("Select up to 5 items to steal:")
                 .components(vec![CreateActionRow::SelectMenu(menu)]),
         )
         .await?;
@@ -123,10 +132,10 @@ pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error
             return Ok(());
         };
 
-        let picked: Vec<ParsedEmoji> = values
+        let picked: Vec<StealItem> = values
             .iter()
             .filter_map(|v| v.parse::<usize>().ok())
-            .filter_map(|i| emojis.get(i).cloned())
+            .filter_map(|i| items.get(i).cloned())
             .collect();
 
         if picked.is_empty() {
@@ -164,16 +173,26 @@ pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error
     }
 
     let mut results = Vec::new();
-    for (i, e) in picked.iter().enumerate() {
+    for (i, item) in picked.iter().enumerate() {
         let name = names
             .get(&i.to_string())
             .filter(|n| !n.trim().is_empty())
             .cloned()
-            .unwrap_or_else(|| e.name.clone());
+            .unwrap_or_else(|| item.display_name().to_string());
+        let name = name.trim().to_string();
 
-        match emoji::steal(&serenity_ctx.http, guild_id, e, name.trim()).await {
-            Ok(created) => results.push(format!("Stole {}", created)),
-            Err(err) => results.push(format!("Failed `{}`: {}", name.trim(), err)),
+        let outcome = match item {
+            StealItem::Emoji(e) => emoji::steal(&serenity_ctx.http, guild_id, e, &name)
+                .await
+                .map(|created| format!("Stole {}", created)),
+            StealItem::Sticker(s) => emoji::steal_sticker(&serenity_ctx.http, guild_id, s, &name)
+                .await
+                .map(|created| format!("Stole sticker `{}`", created.name)),
+        };
+
+        match outcome {
+            Ok(msg) => results.push(msg),
+            Err(err) => results.push(format!("Failed `{}`: {}", name, err)),
         }
     }
 
@@ -189,4 +208,38 @@ pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error
         .await?;
 
     Ok(())
+}
+
+#[poise::command(
+    context_menu_command = "Steal Emoji/Sticker",
+    guild_only,
+    default_member_permissions = "ADMINISTRATOR"
+)]
+pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error> {
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.send(
+            poise::CreateReply::default()
+                .ephemeral(true)
+                .content("This command only works inside a server."),
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let mut emojis = emoji::parse(&message.content);
+    let mut seen: HashSet<u64> = emojis.iter().map(|e| e.id).collect();
+    for e in emoji::parse_reactions(&message.reactions) {
+        if seen.insert(e.id) {
+            emojis.push(e);
+        }
+    }
+
+    let mut items: Vec<StealItem> = emojis.into_iter().map(StealItem::Emoji).collect();
+    items.extend(
+        emoji::parse_stickers(&message)
+            .into_iter()
+            .map(StealItem::Sticker),
+    );
+
+    run_steal_flow(ctx, guild_id, items).await
 }

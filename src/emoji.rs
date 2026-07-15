@@ -7,12 +7,16 @@ use image::codecs::gif::{GifDecoder, GifEncoder};
 use image::codecs::png::{CompressionType as PngCompressionType, FilterType as PngFilterType, PngEncoder};
 use image::{AnimationDecoder, Frame, imageops};
 use regex::Regex;
-use serenity::all::{CreateAttachment, Emoji, GuildId, Http, MessageReaction, ReactionType};
+use serenity::all::{
+    CreateAttachment, CreateSticker, Emoji, GuildId, Http, Message, MessageReaction,
+    ReactionType, Sticker, StickerFormatType,
+};
 
 static EMOJI_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<(a?):(\w{2,32}):(\d+)>").unwrap());
 
 const EMOJI_LIMIT: usize = 256 * 1024;
+const STICKER_LIMIT: usize = 500 * 1024;
 const MIN_DIMENSION: u32 = 32;
 const SCALE_STEP: f32 = 0.85;
 
@@ -28,6 +32,13 @@ impl ParsedEmoji {
         let ext = if self.animated { "gif" } else { "png" };
         format!("https://cdn.discordapp.com/emojis/{}.{}", self.id, ext)
     }
+}
+
+#[derive(Clone)]
+pub struct ParsedSticker {
+    pub name: String,
+    pub format: StickerFormatType,
+    pub url: String,
 }
 
 pub fn parse(content: &str) -> Vec<ParsedEmoji> {
@@ -68,6 +79,21 @@ pub fn parse_reactions(reactions: &[MessageReaction]) -> Vec<ParsedEmoji> {
     emojis
 }
 
+pub fn parse_stickers(message: &Message) -> Vec<ParsedSticker> {
+    message
+        .sticker_items
+        .iter()
+        .filter_map(|item| {
+            let url = item.image_url()?;
+            Some(ParsedSticker {
+                name: item.name.clone(),
+                format: item.format_type,
+                url,
+            })
+        })
+        .collect()
+}
+
 pub async fn steal(
     http: &Http,
     guild_id: GuildId,
@@ -80,6 +106,27 @@ pub async fn steal(
     }
     let image = attachment.to_base64();
     let created = guild_id.create_emoji(http, name, &image).await?;
+    Ok(created)
+}
+
+pub async fn steal_sticker(
+    http: &Http,
+    guild_id: GuildId,
+    sticker: &ParsedSticker,
+    name: &str,
+) -> Result<Sticker> {
+    if sticker.format == StickerFormatType::Gif {
+        bail!("GIF-format stickers can't be re-uploaded as guild stickers");
+    }
+
+    let mut attachment = CreateAttachment::url(http, &sticker.url).await?;
+    if sticker.format == StickerFormatType::Png && attachment.data.len() > STICKER_LIMIT {
+        attachment.data = shrink_to_limit(&attachment.data, false, STICKER_LIMIT)?;
+    }
+
+    let created = guild_id
+        .create_sticker(http, CreateSticker::new(name, attachment).tags("🙂"))
+        .await?;
     Ok(created)
 }
 
