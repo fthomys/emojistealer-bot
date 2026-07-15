@@ -10,3 +10,4 @@ poise = "0.6"
 dotenvy = "0.15"
 anyhow = "1"
 regex = "1"
+image = { version = "0.25.10", default-features = false, features = ["png", "gif"] }
