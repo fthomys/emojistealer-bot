@@ -8,6 +8,13 @@ use serenity::all::{ClientBuilder, GatewayIntents};
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let token = std::env::var("DISCORD_TOKEN").context("DISCORD_TOKEN is not set")?;
     let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
 
