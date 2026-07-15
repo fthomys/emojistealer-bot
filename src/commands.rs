@@ -243,3 +243,30 @@ pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error
 
     run_steal_flow(ctx, guild_id, items).await
 }
+
+#[poise::command(
+    slash_command,
+    guild_only,
+    default_member_permissions = "ADMINISTRATOR"
+)]
+pub async fn steal(
+    ctx: Context<'_>,
+    #[description = "Paste one or more custom emoji, e.g. <:name:id>"] emojis: String,
+) -> Result<(), Error> {
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.send(
+            poise::CreateReply::default()
+                .ephemeral(true)
+                .content("This command only works inside a server."),
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let items: Vec<StealItem> = emoji::parse(&emojis)
+        .into_iter()
+        .map(StealItem::Emoji)
+        .collect();
+
+    run_steal_flow(ctx, guild_id, items).await
+}

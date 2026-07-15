@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![commands::steal_emoji()],
+            commands: vec![commands::steal_emoji(), commands::steal()],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
