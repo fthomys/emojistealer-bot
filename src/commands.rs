@@ -36,7 +36,11 @@ fn build_modal(picked: &[ParsedEmoji]) -> CreateModal {
     CreateModal::new("steal_modal", "Name the emoji(s)").components(rows)
 }
 
-#[poise::command(context_menu_command = "Steal Emoji", guild_only)]
+#[poise::command(
+    context_menu_command = "Steal Emoji",
+    guild_only,
+    default_member_permissions = "ADMINISTRATOR"
+)]
 pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error> {
     let serenity_ctx = ctx.serenity_context();
 
