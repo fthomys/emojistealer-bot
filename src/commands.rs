@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -54,7 +54,13 @@ pub async fn steal_emoji(ctx: Context<'_>, message: Message) -> Result<(), Error
         return Ok(());
     };
 
-    let emojis = emoji::parse(&message.content);
+    let mut emojis = emoji::parse(&message.content);
+    let mut seen: HashSet<u64> = emojis.iter().map(|e| e.id).collect();
+    for e in emoji::parse_reactions(&message.reactions) {
+        if seen.insert(e.id) {
+            emojis.push(e);
+        }
+    }
     if emojis.is_empty() {
         ctx.send(
             poise::CreateReply::default()

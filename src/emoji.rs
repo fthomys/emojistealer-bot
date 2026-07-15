@@ -7,7 +7,7 @@ use image::codecs::gif::{GifDecoder, GifEncoder};
 use image::codecs::png::{CompressionType as PngCompressionType, FilterType as PngFilterType, PngEncoder};
 use image::{AnimationDecoder, Frame, imageops};
 use regex::Regex;
-use serenity::all::{CreateAttachment, Emoji, GuildId, Http};
+use serenity::all::{CreateAttachment, Emoji, GuildId, Http, MessageReaction, ReactionType};
 
 static EMOJI_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<(a?):(\w{2,32}):(\d+)>").unwrap());
@@ -46,6 +46,24 @@ pub fn parse(content: &str) -> Vec<ParsedEmoji> {
             name: caps[2].to_string(),
             id,
         });
+    }
+    emojis
+}
+
+pub fn parse_reactions(reactions: &[MessageReaction]) -> Vec<ParsedEmoji> {
+    let mut seen = HashSet::new();
+    let mut emojis = Vec::new();
+    for reaction in reactions {
+        if let ReactionType::Custom { animated, id, name } = &reaction.reaction_type {
+            if !seen.insert(id.get()) {
+                continue;
+            }
+            emojis.push(ParsedEmoji {
+                animated: *animated,
+                name: name.clone().unwrap_or_else(|| "emoji".to_string()),
+                id: id.get(),
+            });
+        }
     }
     emojis
 }
